@@ -1,11 +1,94 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>API Full Stack Project</title>
-  </head>
-  <body>
-    <!-- You code goes here-->
-  </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WordChain</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:wght@700&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- TITLE SCREEN -->
+  <div id="screen-title" class="screen active">
+    <div class="title-inner">
+      <div class="title-top">
+        <div class="wordmark">WORD<span>CHAIN</span></div>
+        <p class="tagline">A living crossword. One letter at a time.</p>
+      </div>
+      <div class="rules-card">
+        <div class="rule-row"><b>01</b> You are given a word length — type any valid word.</div>
+        <div class="rule-row"><b>02</b> A letter from your word becomes the anchor.</div>
+        <div class="rule-row"><b>03</b> Your next word must cross through that letter.</div>
+        <div class="rule-row"><b>04</b> Keep chaining until the clock hits zero!</div>
+      </div>
+      <button id="btn-start" class="btn-start">START GAME</button>
+    </div>
+  </div>
+
+  <!-- GAME SCREEN -->
+  <div id="screen-game" class="screen">
+    <div class="hud">
+      <div class="hud-block">
+        <span class="hud-label">SCORE</span>
+        <span id="score" class="hud-val">0</span>
+      </div>
+      <div class="hud-timer">
+        <svg class="timer-ring" viewBox="0 0 60 60">
+          <circle class="ring-bg" cx="30" cy="30" r="26"/>
+          <circle id="ring-progress" class="ring-fg" cx="30" cy="30" r="26"/>
+        </svg>
+        <span id="timer-text" class="timer-num">60</span>
+      </div>
+      <div class="hud-block right">
+        <span class="hud-label">STREAK</span>
+        <span id="streak" class="hud-val">0</span>
+      </div>
+    </div>
+
+    <div class="crossword-wrap">
+      <div id="crossword-grid" class="crossword-grid"></div>
+    </div>
+
+    <div class="input-dock">
+      <div id="prompt-hint" class="prompt-hint"></div>
+      <div class="input-row">
+        <input id="word-input" class="word-input" type="text"
+               autocomplete="off" autocorrect="off" spellcheck="false"
+               placeholder="type your word..." maxlength="12" />
+        <button id="btn-submit" class="btn-submit">ENTER</button>
+      </div>
+      <div id="feedback" class="feedback"></div>
+    </div>
+  </div>
+
+  <!-- GAME OVER SCREEN -->
+  <div id="screen-over" class="screen">
+    <div class="over-inner">
+      <p class="over-eye">TIME IS UP</p>
+      <h2 class="over-title">CHAIN<br>BROKEN</h2>
+      <div class="over-stats">
+        <div class="stat-block">
+          <span class="stat-num accent" id="final-score">0</span>
+          <span class="stat-label">SCORE</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-num" id="final-words">0</span>
+          <span class="stat-label">WORDS</span>
+        </div>
+        <div class="stat-block">
+          <span class="stat-num" id="final-streak">0</span>
+          <span class="stat-label">BEST STREAK</span>
+        </div>
+      </div>
+      <div class="word-list-wrap">
+        <div class="word-list-label">CHAIN PLAYED</div>
+        <div id="word-list" class="word-list"></div>
+      </div>
+      <button id="btn-restart" class="btn-start">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
 </html>
