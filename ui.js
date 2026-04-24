@@ -1,26 +1,20 @@
 // ============================================================
 //  ui.js — Crossword-style grid UI
-//
-//  Grid coordinate system: each cell occupies one (col, row)
-//  on an infinite logical grid. The CSS grid is absolutely
-//  positioned elements inside .crossword-grid, which is
-//  translated so the active word stays centred in the viewport.
 // ============================================================
 
-const CELL = 52;   // px — must match --cell-size in CSS
-const GAP  = 4;    // px gap between cells (border accounted for separately)
+import { updateHighScore } from './storage.js';
+
+const CELL = 52;
+const GAP  = 4;
 const STEP = CELL + GAP;
 
-// ── Internal state ───────────────────────────────────────────
+const CANVAS_OFFSET = 2000; // logical (0,0) sits 2000px into the large canvas
+
 let grid = {
-  cells: new Map(),      // "col,row" → { el, letter, wordIdx }
-  words: [],             // [{ word, col, row, dir, anchorIdx }]
-  // camera offset so active word stays centred
-  camCol: 0,
-  camRow: 0,
+  cells: new Map(),  // "col,row" → { el, letter, wordIdx }
+  words: [],         // [{ word, col, row, dir, anchorIdx }]
 };
 
-// ── Public API ───────────────────────────────────────────────
 export const UI = {
   els: {},
 
@@ -33,6 +27,7 @@ export const UI = {
       ringProg:    document.getElementById('ring-progress'),
       promptHint:  document.getElementById('prompt-hint'),
       cwGrid:      document.getElementById('crossword-grid'),
+      cwWrap:      document.getElementById('crossword-wrap'),
       input:       document.getElementById('word-input'),
       feedback:    document.getElementById('feedback'),
       finalScore:  document.getElementById('final-score'),
@@ -40,7 +35,7 @@ export const UI = {
       finalStreak: document.getElementById('final-streak'),
       wordList:    document.getElementById('word-list'),
     };
-    // keep input lowercase only
+
     this.els.input.addEventListener('input', () => {
       this.els.input.value = this.els.input.value.toLowerCase().replace(/[^a-z]/g, '');
     });
@@ -52,7 +47,6 @@ export const UI = {
     if (name === 'over') this._fillOver(data);
   },
 
-  // ── Score / Streak ──────────────────────────────────────────
   updateScore(n)  { this.els.score.textContent  = n; },
   updateStreak(n) { this.els.streak.textContent = n; },
 
@@ -62,15 +56,14 @@ export const UI = {
     el.className = 'score-pop';
     el.textContent = `+${points}`;
     el.style.left = `${rect.left + rect.width / 2 - 20}px`;
-    el.style.top  = `${rect.top - 10}px`;
+    el.style.top  = `${rect.top - 16}px`;
     document.body.appendChild(el);
     el.addEventListener('animationend', () => el.remove());
   },
 
-  // ── Timer ───────────────────────────────────────────────────
   startTimerBar(duration) {
     const ring = this.els.ringProg;
-    const C = 163.4; // 2π×26
+    const C = 163.4;
     ring.style.transition = 'none';
     ring.style.strokeDashoffset = '0';
     ring.classList.remove('warning', 'danger');
@@ -94,19 +87,16 @@ export const UI = {
     }
   },
 
-  // ── Prompt ──────────────────────────────────────────────────
   setPrompt(length, anchorLetter, anchorPos) {
     if (!anchorLetter) {
+      this.els.promptHint.textContent = `Type any ${length}-letter word to start your chain`;
+    } else {
+      const posWord = anchorPos === 'start' ? 'starts' : 'ends';
       this.els.promptHint.textContent =
-        `Type any ${length}-letter word to start your chain`;
-      return;
+        `Type a ${length}-letter word that ${posWord} with "${anchorLetter.toUpperCase()}"`;
     }
-    const posWord = anchorPos === 'start' ? 'starts' : 'ends';
-    this.els.promptHint.textContent =
-      `Type a ${length}-letter word that ${posWord} with "${anchorLetter.toUpperCase()}"`;
   },
 
-  // ── Input ───────────────────────────────────────────────────
   clearInput()  { this.els.input.value = ''; },
   focusInput()  { this.els.input.focus(); },
   shakeInput()  {
@@ -117,98 +107,92 @@ export const UI = {
     el.addEventListener('animationend', () => el.classList.remove('shake'), { once: true });
   },
 
-  // ── Feedback ────────────────────────────────────────────────
   setFeedback(msg, type = '') {
     const el = this.els.feedback;
     el.textContent = msg;
     el.className = 'feedback' + (type ? ` ${type}` : '');
   },
 
-  // ── Crossword grid ───────────────────────────────────────────
+  // ── Grid ────────────────────────────────────────────────────
 
   clearChain() {
     grid.cells.clear();
     grid.words = [];
-    grid.camCol = 0;
-    grid.camRow = 0;
     this.els.cwGrid.innerHTML = '';
-    this._reframe(0, 0, 0, 0, false);
+    this._setCamera(0, 0, false);
   },
 
-  /**
-   * Called after a word is accepted.
-   * Lays the new word on the grid, fades the previous active cells,
-   * and re-centres the view.
-   */
-  addChainWord(word, anchorIdx) {
+  // crossingIdx: index in `word` that must land on the previous word's exit anchor cell
+  // exitAnchorIdx: index in `word` chosen as the anchor for the NEXT word
+  addChainWord(word, crossingIdx, exitAnchorIdx) {
     const wordIdx = grid.words.length;
     const prevWord = wordIdx > 0 ? grid.words[wordIdx - 1] : null;
 
-    // Determine placement
+    // ── 1. Compute placement ──────────────────────────────────
     let col, row, dir;
 
     if (!prevWord) {
       // First word: horizontal, centred at origin
-      col = 0;
+      col = -Math.floor(word.length / 2);
       row = 0;
       dir = 'h';
+      // crossingIdx not used for first word placement
     } else {
-      // The anchor cell of the PREVIOUS word determines where this word attaches
-      const anchorCell = _getAnchorCell(prevWord);
-      const prevDir = prevWord.dir;
-
-      // New word goes perpendicular to the previous
-      dir = prevDir === 'h' ? 'v' : 'h';
-
-      // Place so that anchorIdx of the new word lands on anchorCell
+      // Perpendicular. crossingIdx cell of new word lands on prev exit anchor.
+      const ac = _anchorCell(prevWord);
+      dir = prevWord.dir === 'h' ? 'v' : 'h';
       if (dir === 'h') {
-        col = anchorCell.col - anchorIdx;
-        row = anchorCell.row;
+        col = ac.col - crossingIdx;
+        row = ac.row;
       } else {
-        col = anchorCell.col;
-        row = anchorCell.row - anchorIdx;
+        col = ac.col;
+        row = ac.row - crossingIdx;
       }
     }
 
-    const wordEntry = { word, col, row, dir, anchorIdx };
+    // anchorIdx stored is the EXIT anchor (for next word placement)
+    const wordEntry = { word, col, row, dir, anchorIdx: exitAnchorIdx !== undefined ? exitAnchorIdx : crossingIdx, crossingIdx, wordIdx };
     grid.words.push(wordEntry);
 
-    // Fade previous word's cells (but keep anchor cell highlighted)
-    if (prevWord) {
-      _fadePrevWord(prevWord, grid.cells);
+    // ── 2. Hide word older than 2 generations (wordIdx - 2) ──
+    //    We remove its cells entirely UNLESS that cell is also
+    //    owned by a more recent word (checked via cell.wordIdx).
+    const removeIdx = wordIdx - 2;
+    if (removeIdx >= 0) {
+      _removeCellsForWord(grid.words[removeIdx], wordIdx);
     }
 
-    // Paint new cells
-    _paintWord(wordEntry, wordIdx, grid.cells, this.els.cwGrid);
+    // ── 3. Dim the word that is now 1 generation old ──────────
+    //    (was active, becomes faded)
+    if (prevWord) {
+      _fadeCellsForWord(prevWord, wordIdx);
+    }
 
-    // Re-centre view on new word's midpoint
+    // ── 4. Paint the new word ─────────────────────────────────
+    _paintWord(wordEntry, this.els.cwGrid);
+
+    // ── 5. Pan camera to midpoint of new word ─────────────────
     const midIdx = Math.floor(word.length / 2);
-    const midCol = dir === 'h' ? col + midIdx : col;
-    const midRow = dir === 'v' ? row + midIdx : row;
-    this._reframe(midCol, midRow, col, row, true);
+    const camCol = dir === 'h' ? col + midIdx : col;
+    const camRow = dir === 'v' ? row + midIdx : row;
+    this._setCamera(camCol, camRow, wordIdx > 0);
   },
 
-  // ── Private ──────────────────────────────────────────────────
+  _setCamera(camCol, camRow, animate) {
+    const wrap = this.els.cwWrap;
+    const ww = wrap.clientWidth  || wrap.offsetWidth  || window.innerWidth;
+    const wh = wrap.clientHeight || wrap.offsetHeight || 300;
 
-  _reframe(camCol, camRow, wordCol, wordRow, animate) {
-    grid.camCol = camCol;
-    grid.camRow = camRow;
+    const cellPxX = CANVAS_OFFSET + camCol * STEP;
+    const cellPxY = CANVAS_OFFSET + camRow * STEP;
+    const tx = ww / 2 - cellPxX - CELL / 2;
+    const ty = wh / 2 - cellPxY - CELL / 2;
 
-    const wrap = this.els.cwGrid.parentElement;
-    const ww = wrap.offsetWidth;
-    const wh = wrap.offsetHeight;
-
-    // Translate grid so camCol,camRow appears in the centre of the wrap
-    const tx = ww / 2 - camCol * STEP - CELL / 2;
-    const ty = wh / 2 - camRow * STEP - CELL / 2;
-
-    const gridEl = this.els.cwGrid;
-    if (animate) {
-      gridEl.style.transition = 'transform 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-    } else {
-      gridEl.style.transition = 'none';
-    }
-    gridEl.style.transform = `translate(${tx}px, ${ty}px)`;
+    const g = this.els.cwGrid;
+    g.style.transition = animate
+      ? 'transform 0.55s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+      : 'none';
+    g.style.transform = `translate(${tx}px, ${ty}px)`;
   },
 
   _fillOver({ score, words, streak, wordsUsed }) {
@@ -216,92 +200,112 @@ export const UI = {
     this.els.finalWords.textContent  = words;
     this.els.finalStreak.textContent = streak;
 
+    // update persistent high score
+    try { updateHighScore(Number(score)); } catch (e) { /* ignore */ }
+
     this.els.wordList.innerHTML = '';
-    wordsUsed.forEach(({ word, anchorIdx }) => {
+    (wordsUsed || []).forEach(({ word, anchorIdx }) => {
       const chip = document.createElement('div');
       chip.className = 'wl-chip';
       chip.innerHTML = [...word].map((ch, i) =>
-        i === anchorIdx
-          ? `<span class="wl-anchor">${ch}</span>`
-          : ch
+        i === anchorIdx ? `<span class="wl-anchor">${ch}</span>` : ch
       ).join('');
       this.els.wordList.appendChild(chip);
     });
   },
 };
 
-// ── Grid helpers ─────────────────────────────────────────────
+// ── Internal helpers ─────────────────────────────────────────
 
 function _key(col, row) { return `${col},${row}`; }
 
-function _getAnchorCell(wordEntry) {
-  const { col, row, dir, anchorIdx } = wordEntry;
+function _anchorCell({ col, row, dir, anchorIdx }) {
   return {
     col: dir === 'h' ? col + anchorIdx : col,
     row: dir === 'v' ? row + anchorIdx : row,
   };
 }
 
-function _fadePrevWord(prevWord, cells) {
-  const { word, col, row, dir, anchorIdx } = prevWord;
+// Iterate every cell position belonging to a word entry.
+function _iterCells(wordEntry, cb) {
+  const { word, col, row, dir } = wordEntry;
   for (let i = 0; i < word.length; i++) {
     const c = dir === 'h' ? col + i : col;
     const r = dir === 'v' ? row + i : row;
-    const k = _key(c, r);
-    const entry = cells.get(k);
-    if (!entry) continue;
-
-    // Keep the anchor cell as-is (it'll be shared / overdrawn by new word)
-    if (i === anchorIdx) continue;
-
-    entry.el.classList.remove('active');
-    entry.el.classList.add('faded');
+    cb(c, r, i);
   }
 }
 
-function _paintWord(wordEntry, wordIdx, cells, container) {
-  const { word, col, row, dir, anchorIdx } = wordEntry;
+// Fade cells of `wordEntry` that are still owned by it (not re-claimed
+// by a newer word).  currentLatestIdx = index of the word being added now.
+function _fadeCellsForWord(wordEntry, currentLatestIdx) {
+  _iterCells(wordEntry, (c, r) => {
+    const entry = grid.cells.get(_key(c, r));
+    // Only fade if this cell is still "owned" by this word
+    if (entry && entry.wordIdx === wordEntry.wordIdx) {
+      entry.el.classList.remove('active', 'anchor');
+      entry.el.classList.add('faded');
+    }
+  });
+}
+
+// Remove cells belonging to `wordEntry` that haven't been reclaimed
+// by any word newer than removeIdx.
+function _removeCellsForWord(wordEntry, currentLatestIdx) {
+  _iterCells(wordEntry, (c, r) => {
+    const k = _key(c, r);
+    const entry = grid.cells.get(k);
+    if (!entry) return;
+    // Only remove if still owned by this (old) word
+    if (entry.wordIdx === wordEntry.wordIdx) {
+      entry.el.remove();
+      grid.cells.delete(k);
+    }
+  });
+}
+
+function _paintWord(wordEntry, container) {
+  const { word, col, row, dir, crossingIdx, wordIdx } = wordEntry;
 
   for (let i = 0; i < word.length; i++) {
     const c = dir === 'h' ? col + i : col;
     const r = dir === 'v' ? row + i : row;
     const k = _key(c, r);
-    const letter = word[i];
-    const isAnchor = (i === anchorIdx);
+    // The crossing cell (shared with previous word) gets the dark anchor style
+    const isAnchor = i === crossingIdx;
+    const letter = word[i].toUpperCase();
 
-    let entry = cells.get(k);
+    const px = CANVAS_OFFSET + c * STEP;
+    const py = CANVAS_OFFSET + r * STEP;
 
-    if (entry) {
-      // Cell already exists (shared anchor). Update classes.
-      entry.el.classList.remove('faded', 'ghost');
-      entry.el.classList.add('active');
-      if (isAnchor) entry.el.classList.add('anchor');
-      // letter should already match — skip inner text update
+    const existing = grid.cells.get(k);
+
+    if (existing) {
+      // ── Cell already exists (shared crossing letter) ──
+      // ALWAYS update letter to the new word's letter at this position.
+      // This fixes the stale-letter bug.
+      existing.el.textContent = letter;
+      existing.el.classList.remove('faded', 'ghost');
+      existing.el.classList.add('active');
+      if (isAnchor) existing.el.classList.add('anchor');
+      // Re-claim ownership so removal logic works correctly
+      existing.wordIdx = wordIdx;
     } else {
-      // Create new cell element
+      // ── Create a new cell ──
       const el = document.createElement('div');
       el.className = 'cw-cell active' + (isAnchor ? ' anchor' : '');
-      el.textContent = letter.toUpperCase();
-      el.style.left = `${c * STEP}px`;
-      el.style.top  = `${r * STEP}px`;
-
-      // Stagger reveal: cells appear one by one along the word
-      const delay = i * 55;
-      el.style.transitionDelay = `${delay}ms`;
-
+      el.textContent = letter;
+      el.style.left = `${px}px`;
+      el.style.top  = `${py}px`;
+      el.style.transitionDelay = `${i * 50}ms`;
       container.appendChild(el);
 
-      // Trigger enter animation on next frame
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          el.classList.add('visible');
-          // Clear delay after animation so fading works promptly later
-          setTimeout(() => { el.style.transitionDelay = '0ms'; }, delay + 400);
-        });
-      });
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.classList.add('visible');
+        setTimeout(() => { el.style.transitionDelay = '0ms'; }, i * 50 + 420);
+      }));
 
-      entry = { el, letter, wordIdx };
-      cells.set(k, entry);
+      grid.cells.set(k, { el, letter: word[i], wordIdx });
     }
   }
 }

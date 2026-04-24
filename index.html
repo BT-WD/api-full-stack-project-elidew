@@ -12,10 +12,8 @@
   <!-- TITLE SCREEN -->
   <div id="screen-title" class="screen active">
     <div class="title-inner">
-      <div class="title-top">
-        <div class="wordmark">WORD<span>CHAIN</span></div>
-        <p class="tagline">A living crossword. One letter at a time.</p>
-      </div>
+      <div class="wordmark">WORD<span>CHAIN</span></div>
+      <p class="tagline">A living crossword. One letter at a time.</p>
       <div class="rules-card">
         <div class="rule-row"><b>01</b> You are given a word length — type any valid word.</div>
         <div class="rule-row"><b>02</b> A letter from your word becomes the anchor.</div>
@@ -27,12 +25,20 @@
   </div>
 
   <!-- GAME SCREEN -->
-  <div id="screen-game" class="screen">
+  <div id="screen-game" class="screen" style="height:100vh; flex-direction:column;">
+    <!-- HUD bar -->
     <div class="hud">
       <div class="hud-block">
         <span class="hud-label">SCORE</span>
         <span id="score" class="hud-val">0</span>
       </div>
+
+      <!-- High score (persisted to localStorage) -->
+      <div class="hud-block">
+        <span class="hud-label">HIGH</span>
+        <span id="high-score" class="hud-val">0</span>
+      </div>
+
       <div class="hud-timer">
         <svg class="timer-ring" viewBox="0 0 60 60">
           <circle class="ring-bg" cx="30" cy="30" r="26"/>
@@ -46,10 +52,12 @@
       </div>
     </div>
 
-    <div class="crossword-wrap">
-      <div id="crossword-grid" class="crossword-grid"></div>
+    <!-- Crossword canvas — grows to fill remaining space -->
+    <div id="crossword-wrap">
+      <div id="crossword-grid"></div>
     </div>
 
+    <!-- Input dock -->
     <div class="input-dock">
       <div id="prompt-hint" class="prompt-hint"></div>
       <div class="input-row">

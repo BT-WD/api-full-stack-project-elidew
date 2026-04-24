@@ -171,7 +171,9 @@ function acceptWord(word) {
   UI.updateScore(state.score);
   UI.updateStreak(state.streak);
   UI.scorePopup(points);
-  UI.addChainWord(word, anchorIdx);
+  // crossingIdx: where this word crosses into previous anchor (0 or last letter)
+  const crossingIdx = state.anchorPos === 'start' ? 0 : word.length - 1;
+  UI.addChainWord(word, crossingIdx, anchorIdx);
 
   // Next round
   state.anchorLetter  = word[anchorIdx];
