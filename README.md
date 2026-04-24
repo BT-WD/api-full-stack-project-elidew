@@ -1,1 +1,2 @@
 # API-Project
+Create the longest chain of words you can in a minute! The program gives you a random letter from your previous word to be the first or last letter of your new word, and pick number of letters, and you have to think of a word that fits both criteria.
